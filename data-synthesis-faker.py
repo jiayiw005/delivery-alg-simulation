@@ -2,7 +2,7 @@ from faker import Faker
 import numpy as np
 import pandas as pd
 
-# create synthetic dataset via faker
+# Create synthetic dataset via faker
 fake = Faker()
 
 def generate_fake_delivery_data(n=1000):
@@ -29,5 +29,5 @@ def generate_fake_delivery_data(n=1000):
     return pd.DataFrame(data)
 
 synthetic_data = generate_fake_delivery_data(1000)
-synthetic_data.to_csv("fake_delivery_orders.csv", index=False)
+synthetic_data.to_csv("/data/unassigned_orders_faker.csv", index=False)
 print("Fake data generated!")
