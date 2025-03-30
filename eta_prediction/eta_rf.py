@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from geopy.distance import geodesic
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.pipeline import Pipeline
@@ -8,17 +9,19 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error
+from collections import defaultdict
 
-def load_and_preprocess_data(filepath_or_df):
-    """Load and preprocess the delivery data"""
+def load_and_preprocess_data(filepath_or_df, include_worker_features=False):
+    """Load and preprocess the delivery data with optional worker features"""
     if isinstance(filepath_or_df, str):
         df = pd.read_csv(filepath_or_df).reset_index(drop=True)
     else:
         df = filepath_or_df.copy()
-    
+
+    # Time feature
     if 'Time_taken(min)' in df.columns:
         df['Time_taken(min)'] = df['Time_taken(min)'].str.extract('(\d+)').astype(float)
-    
+
     def parse_time(time_str):
         if pd.isna(time_str):
             return np.nan
@@ -28,7 +31,7 @@ def load_and_preprocess_data(filepath_or_df):
             except:
                 continue
         return np.nan
-    
+
     if 'Time_Orderd' in df.columns:
         df['Order_Time'] = df['Time_Orderd'].apply(parse_time)
         df['Order_Hour'] = df['Order_Time'].apply(lambda x: x.hour if pd.notna(x) else np.nan)
@@ -37,7 +40,7 @@ def load_and_preprocess_data(filepath_or_df):
             df['Order_Hour'] = df['Order_Hour'].fillna(mode_hour)
         else:
             df['Order_Hour'] = 12
-    
+
     # Distance calculation
     loc_cols = ['Restaurant_latitude', 'Restaurant_longitude',
                'Delivery_location_latitude', 'Delivery_location_longitude']
@@ -49,7 +52,7 @@ def load_and_preprocess_data(filepath_or_df):
             ).km,
             axis=1
         )
-    
+
     # Temporal features
     if 'Order_Date' in df.columns:
         df['Order_Date'] = pd.to_datetime(df['Order_Date'], format='%d-%m-%Y', errors='coerce')
@@ -57,19 +60,38 @@ def load_and_preprocess_data(filepath_or_df):
         df['Is_Weekend'] = df['Order_Date'].dt.weekday.isin([5, 6]).astype(int)
         df['Month'] = df['Order_Date'].dt.month
         df['Day_of_week'] = df['Order_Date'].dt.weekday
-    
+
     if 'Order_Hour' in df.columns:
         df['Is_Rush_Hour'] = df['Order_Hour'].apply(lambda x: 1 if x in [7,8,9,17,18,19] else 0)
-    
+
+    # Add synthetic worker features if needed
+    if include_worker_features:
+        df['worker_hours_worked'] = np.clip(np.random.normal(6, 2, len(df)), 0, 12)
+        df['worker_current_load'] = np.random.randint(1, 5, len(df))
+        df['worker_vehicle_speed'] = df['Type_of_vehicle'].map({
+            'motorcycle': 40, 
+            'scooter': 30, 
+            'electric_scooter': 25
+        })
+        df['worker_high_priority_count'] = np.random.poisson(1, len(df))
+
     return df
 
-def build_model_pipeline():
-    """Build the ML pipeline for ETA prediction"""
-    categorical_features = ['Weatherconditions', 'Road_traffic_density', 
+def build_model_pipeline(include_worker_features=False):
+    """Build the ML pipeline for ETA prediction with optional worker features"""
+    categorical_features = ['Weatherconditions', 'Road_traffic_density',
                           'Type_of_vehicle', 'City', 'Festival']
-    numeric_features = ['Distance_km', 'Order_Hour', 'Is_Weekend', 
+    
+    numeric_features = ['Distance_km', 'Order_Hour', 'Is_Weekend',
                        'Month', 'Day_of_week', 'Is_Rush_Hour']
     
+    if include_worker_features:
+        numeric_features.extend([
+            'worker_hours_worked', 
+            'worker_current_load',
+            'worker_vehicle_speed'
+        ])
+
     preprocessor = ColumnTransformer(
         transformers=[
             ('cat', Pipeline(steps=[
@@ -81,7 +103,7 @@ def build_model_pipeline():
                 ('scaler', StandardScaler())
             ]), numeric_features)
         ])
-    
+
     return Pipeline(steps=[
         ('preprocessor', preprocessor),
         ('regressor', RandomForestRegressor(
@@ -93,41 +115,48 @@ def build_model_pipeline():
         ))
     ])
 
-def train_and_evaluate(df):
-    """Train and evaluate the model"""
-    # Feature definitions
-    possible_features = ['Weatherconditions', 'Road_traffic_density', 'Type_of_vehicle', 
+def train_and_evaluate(df, include_worker_features=False):
+    """Train and evaluate the model with optional worker features"""
+    possible_features = ['Weatherconditions', 'Road_traffic_density', 'Type_of_vehicle',
                         'City', 'Festival', 'Distance_km', 'Order_Hour', 'Is_Weekend',
                         'Month', 'Day_of_week', 'Is_Rush_Hour']
-    features = [f for f in possible_features if f in df.columns]
     
+    if include_worker_features:
+        possible_features.extend([
+            'worker_hours_worked',
+            'worker_current_load',
+            'worker_vehicle_speed'
+        ])
+
+    features = [f for f in possible_features if f in df.columns]
     X = df[features]
     y = df['Time_taken(min)']
-    
+
     valid_rows = y.notna()
     X = X[valid_rows]
     y = y[valid_rows]
-    
+
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42)
-    
-    model = build_model_pipeline()
+
+    model = build_model_pipeline(include_worker_features)
     model.fit(X_train, y_train)
-    
+
     y_pred = model.predict(X_test)
     mae = mean_absolute_error(y_test, y_pred)
     print(f"Model MAE: {mae:.2f} minutes")
-    
+
     return model, features
 
 if __name__ == "__main__":
     try:
-        df = load_and_preprocess_data("train.csv")
-        
+        # Load and preprocess training data
+        df = load_and_preprocess_data("/data/train.csv")
+
         if len(df) < 100:
             raise ValueError("Insufficient data after preprocessing")
-            
-        model, features_used = train_and_evaluate(df)
         
+        model, features_used = train_and_evaluate(df)
+
     except Exception as e:
         print(f"Error: {str(e)}")
