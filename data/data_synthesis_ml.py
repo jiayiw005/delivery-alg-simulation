@@ -164,13 +164,13 @@ def generate_unassigned_orders_ml(historical_data, num_orders=1000):
 if __name__ == "__main__":
     try:
         
-        historical_orders = pd.read_csv("/data/train.csv")
+        historical_orders = pd.read_csv("train.csv")
         print(f"Loaded {len(historical_orders)} historical orders")
         
         unassigned_orders = generate_unassigned_orders_ml(historical_orders, num_orders=1000)
         
         # Save to csv
-        output_path = "/data/unassigned_orders_ml.csv"
+        output_path = "unassigned_orders_ml.csv"
         unassigned_orders.to_csv(output_path, index=False)
         print(f"Saved {len(unassigned_orders)} unassigned orders to {output_path}")
     
